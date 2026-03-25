@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   title: "BaseFlow",
   description: "Boxy Base multisender",
   other: {
-    "base:app:id": "69c3144cf58f3fd1ddcf3f31",
+    "base:app_id": "69c3144cf58f3fd1ddcf3f31",
   },
 };
 
