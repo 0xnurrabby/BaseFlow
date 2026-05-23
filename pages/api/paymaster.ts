@@ -7,17 +7,22 @@ type ErrorResponse = {
   error: string;
 };
 
-const PAYMASTER_METHODS = new Set(['pm_getPaymasterStubData', 'pm_getPaymasterData']);
+const DEFAULT_ALLOWED_ORIGINS = new Set(['https://keys.coinbase.com']);
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<string | ErrorResponse>) {
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return res.status(405).json({ error: 'Method not allowed' });
+  if (!isAllowedOrigin(req.headers.origin)) {
+    return res.status(403).json({ error: 'Origin is not allowed to use this paymaster proxy' });
   }
 
-  const allowedOrigin = process.env.PAYMASTER_ALLOWED_ORIGIN?.trim();
-  if (allowedOrigin && req.headers.origin && req.headers.origin !== allowedOrigin) {
-    return res.status(403).json({ error: 'Origin is not allowed to use this paymaster proxy' });
+  setCorsHeaders(req, res);
+
+  if (req.method === 'OPTIONS') {
+    return res.status(204).send('');
+  }
+
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST, OPTIONS');
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   const paymasterUrl = process.env.CDP_PAYMASTER_URL;
@@ -63,6 +68,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
   const responseText = await upstreamResponse.text();
   const contentType = upstreamResponse.headers.get('content-type');
 
+  if (!upstreamResponse.ok) {
+    console.warn('CDP paymaster rejected request', {
+      status: upstreamResponse.status,
+      methods: getJsonRpcMethods(payload),
+      body: truncateForLog(responseText),
+    });
+  }
+
   res.setHeader('Cache-Control', 'no-store');
   if (contentType) {
     res.setHeader('content-type', contentType);
@@ -96,8 +109,55 @@ function hasOnlyPaymasterMethods(payload: JsonValue): boolean {
     }
 
     const method = request.method;
-    return typeof method === 'string' && PAYMASTER_METHODS.has(method);
+
+    // Base Account currently uses the ERC-7677 methods pm_getPaymasterStubData and
+    // pm_getPaymasterData. Some wallets/providers add compatible pm_* methods, so
+    // avoid rejecting valid paymaster traffic before CDP can apply its policy.
+    return typeof method === 'string' && method.startsWith('pm_');
   });
+}
+
+function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) {
+    return true;
+  }
+
+  const configuredOrigins = (process.env.PAYMASTER_ALLOWED_ORIGIN || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const allowedOrigins = new Set([...DEFAULT_ALLOWED_ORIGINS, ...configuredOrigins]);
+
+  return allowedOrigins.has(origin);
+}
+
+function setCorsHeaders(req: NextApiRequest, res: NextApiResponse) {
+  const origin = req.headers.origin;
+
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'content-type');
+  res.setHeader('Access-Control-Max-Age', '86400');
+}
+
+function getJsonRpcMethods(payload: JsonValue): string[] {
+  const requests = Array.isArray(payload) ? payload : [payload];
+
+  return requests.flatMap((request) => {
+    if (!request || typeof request !== 'object' || Array.isArray(request)) {
+      return [];
+    }
+
+    return typeof request.method === 'string' ? [request.method] : [];
+  });
+}
+
+function truncateForLog(value: string): string {
+  return value.length > 600 ? `${value.slice(0, 600)}...` : value;
 }
 
 function isSafeHttpUrl(value: string): boolean {
