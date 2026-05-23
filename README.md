@@ -21,3 +21,4 @@ Use one recipient per line:
 ```
 
 Token mode uses `tokenDecimals` to parse amounts and requires prior ERC20 allowance for the multisender contract.
+The UI includes a token readiness check for the connected Base Account smart wallet and an approval transaction button when allowance is too low.

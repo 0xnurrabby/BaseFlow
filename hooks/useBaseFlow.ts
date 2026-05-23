@@ -1,15 +1,18 @@
-import { createBaseAccountSDK, getCryptoKeyAccount, base } from '@base-org/account';
+import { createBaseAccountSDK, getCryptoKeyAccount, base as baseAccount } from '@base-org/account';
 import { useState } from 'react';
 import {
   type Address,
   type Hex,
+  createPublicClient,
   encodeFunctionData,
   getAddress,
+  http,
   isAddress,
   numberToHex,
   parseEther,
   parseUnits,
 } from 'viem';
+import { base as baseChain, baseSepolia } from 'viem/chains';
 
 export type BaseFlowMode = 'eth' | 'token';
 
@@ -28,6 +31,34 @@ export type ExecuteGaslessContractCallArgs = {
   multisenderAddress?: Address | string;
   paymasterProxyUrl?: string;
   chainId?: number;
+};
+
+export type TokenReadinessArgs = {
+  recipientBoard: string;
+  tokenAddress: Address | string;
+  tokenDecimals?: number;
+  owner?: Address | string;
+  multisenderAddress?: Address | string;
+  chainId?: number;
+};
+
+export type TokenReadiness = {
+  owner: Address;
+  tokenAddress: Address;
+  multisenderAddress: Address;
+  decimals: number;
+  recipientCount: number;
+  requiredAmount: bigint;
+  balance: bigint;
+  allowance: bigint;
+  hasEnoughBalance: boolean;
+  hasEnoughAllowance: boolean;
+  isReady: boolean;
+};
+
+export type ApproveTokenSpendArgs = Omit<TokenReadinessArgs, 'owner'> & {
+  amount?: bigint;
+  currentAllowance?: bigint;
 };
 
 export type WalletSendCallsResult = string | { id?: string; [key: string]: unknown };
@@ -66,8 +97,40 @@ export const baseFlowMultisenderAbi = [
   },
 ] as const;
 
+export const baseFlowErc20Abi = [
+  {
+    type: 'function',
+    name: 'balanceOf',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: 'balance', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'allowance',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'owner', type: 'address' },
+      { name: 'spender', type: 'address' },
+    ],
+    outputs: [{ name: 'remaining', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'approve',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'spender', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [{ name: 'success', type: 'bool' }],
+  },
+] as const;
+
 export function useBaseFlow() {
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isApproving, setIsApproving] = useState(false);
+  const [isCheckingToken, setIsCheckingToken] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<WalletSendCallsResult | null>(null);
 
@@ -110,9 +173,121 @@ export function useBaseFlow() {
     }
   }
 
+  async function checkTokenReadiness(args: TokenReadinessArgs): Promise<TokenReadiness> {
+    setIsCheckingToken(true);
+    setError(null);
+
+    try {
+      const chainId = resolveChainId(args.chainId);
+      const provider = createBaseFlowProvider(chainId);
+      const owner = args.owner ? resolveAddress(args.owner, 'owner') : await getConnectedBaseAccount(provider);
+      const tokenAddress = resolveAddress(args.tokenAddress, 'tokenAddress');
+      const multisenderAddress = resolveAddress(
+        args.multisenderAddress || process.env.NEXT_PUBLIC_MULTISENDER_CONTRACT_ADDRESS,
+        'NEXT_PUBLIC_MULTISENDER_CONTRACT_ADDRESS',
+      );
+      const decimals = validateDecimals(args.tokenDecimals ?? 18);
+      const parsedRecipients = parseRecipientBoard(args.recipientBoard, decimals);
+      const requiredAmount = sumRecipientAmounts(parsedRecipients);
+      const publicClient = createBaseFlowPublicClient(chainId);
+
+      const [balance, allowance] = await Promise.all([
+        publicClient.readContract({
+          address: tokenAddress,
+          abi: baseFlowErc20Abi,
+          functionName: 'balanceOf',
+          args: [owner],
+        }),
+        publicClient.readContract({
+          address: tokenAddress,
+          abi: baseFlowErc20Abi,
+          functionName: 'allowance',
+          args: [owner, multisenderAddress],
+        }),
+      ]);
+
+      const hasEnoughBalance = balance >= requiredAmount;
+      const hasEnoughAllowance = allowance >= requiredAmount;
+
+      return {
+        owner,
+        tokenAddress,
+        multisenderAddress,
+        decimals,
+        recipientCount: parsedRecipients.length,
+        requiredAmount,
+        balance,
+        allowance,
+        hasEnoughBalance,
+        hasEnoughAllowance,
+        isReady: hasEnoughBalance && hasEnoughAllowance,
+      };
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : 'Token balance and allowance check failed';
+      setError(message);
+      throw caught;
+    } finally {
+      setIsCheckingToken(false);
+    }
+  }
+
+  async function approveTokenSpend(args: ApproveTokenSpendArgs): Promise<WalletSendCallsResult> {
+    setIsApproving(true);
+    setError(null);
+
+    try {
+      const chainId = resolveChainId(args.chainId);
+      const provider = createBaseFlowProvider(chainId);
+      const from = await getConnectedBaseAccount(provider);
+      const tokenAddress = resolveAddress(args.tokenAddress, 'tokenAddress');
+      const multisenderAddress = resolveAddress(
+        args.multisenderAddress || process.env.NEXT_PUBLIC_MULTISENDER_CONTRACT_ADDRESS,
+        'NEXT_PUBLIC_MULTISENDER_CONTRACT_ADDRESS',
+      );
+      const decimals = validateDecimals(args.tokenDecimals ?? 18);
+      const amount = args.amount ?? sumRecipientAmounts(parseRecipientBoard(args.recipientBoard, decimals));
+
+      if (amount <= 0n) {
+        throw new Error('Approval amount must be greater than zero');
+      }
+
+      const approvalCalls = [
+        ...(args.currentAllowance && args.currentAllowance > 0n
+          ? [buildApprovalCall(tokenAddress, multisenderAddress, 0n)]
+          : []),
+        buildApprovalCall(tokenAddress, multisenderAddress, amount),
+      ];
+
+      const result = await provider.request<WalletSendCallsResult>({
+        method: 'wallet_sendCalls',
+        params: [
+          {
+            version: '1.0',
+            chainId: numberToHex(chainId),
+            from,
+            calls: approvalCalls,
+          },
+        ],
+      });
+
+      setLastResult(result);
+      return result;
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : 'Token approval failed';
+      setError(message);
+      throw caught;
+    } finally {
+      setIsApproving(false);
+    }
+  }
+
   return {
     executeGaslessContractCall,
+    checkTokenReadiness,
+    approveTokenSpend,
     isProcessing,
+    isApproving,
+    isCheckingToken,
     error,
     lastResult,
   };
@@ -127,7 +302,7 @@ export function buildMultisendCall(args: ExecuteGaslessContractCallArgs): Multis
   const parsedRecipients = parseRecipientBoard(args.recipientBoard, decimals);
   const recipients = parsedRecipients.map((item) => item.recipient);
   const amounts = parsedRecipients.map((item) => item.amount);
-  const totalAmount = amounts.reduce((total, amount) => total + amount, 0n);
+  const totalAmount = sumRecipientAmounts(parsedRecipients);
 
   if (args.mode === 'eth') {
     return {
@@ -226,6 +401,31 @@ function createBaseFlowProvider(chainId: number): Eip1193Provider {
   return sdk.getProvider() as Eip1193Provider;
 }
 
+function createBaseFlowPublicClient(chainId: number) {
+  const chain = chainId === baseSepolia.id ? baseSepolia : baseChain;
+
+  if (chain.id !== chainId) {
+    throw new Error('Token checks currently support Base mainnet and Base Sepolia only');
+  }
+
+  return createPublicClient({
+    chain,
+    transport: http(),
+  });
+}
+
+function buildApprovalCall(tokenAddress: Address, spender: Address, amount: bigint): MultisendCall {
+  return {
+    to: tokenAddress,
+    value: '0x0',
+    data: encodeFunctionData({
+      abi: baseFlowErc20Abi,
+      functionName: 'approve',
+      args: [spender, amount],
+    }),
+  };
+}
+
 async function getConnectedBaseAccount(provider: Eip1193Provider): Promise<Address> {
   const cryptoAccount = await getCryptoKeyAccount();
   const cryptoAddress = cryptoAccount?.account?.address;
@@ -276,7 +476,11 @@ function resolveChainId(chainId?: number): number {
     return envChainId;
   }
 
-  return base.constants.CHAIN_IDS.base;
+  return baseAccount.constants.CHAIN_IDS.base;
+}
+
+function sumRecipientAmounts(recipients: Pick<ParsedRecipient, 'amount'>[]): bigint {
+  return recipients.reduce((total, item) => total + item.amount, 0n);
 }
 
 function validateDecimals(decimals: number): number {
