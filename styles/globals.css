@@ -1,0 +1,252 @@
+:root {
+  color-scheme: light;
+  --ink: #101010;
+  --paper: #fff4d6;
+  --acid: #d7ff2f;
+  --base-blue: #2457ff;
+  --hot: #ff4d9d;
+  --muted: #6c6048;
+  --shadow: 8px 8px 0 var(--ink);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--ink);
+  background:
+    linear-gradient(90deg, rgba(16, 16, 16, 0.08) 1px, transparent 1px),
+    linear-gradient(rgba(16, 16, 16, 0.08) 1px, transparent 1px),
+    var(--paper);
+  background-size: 28px 28px;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.shell {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 48px 0;
+}
+
+.hero-card,
+.panel {
+  border: 3px solid var(--ink);
+  background: #fffaf0;
+  box-shadow: var(--shadow);
+}
+
+.hero-card {
+  padding: clamp(28px, 5vw, 56px);
+  margin-bottom: 32px;
+  background: linear-gradient(135deg, var(--acid), #fffaf0 50%, #c7d3ff);
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+h1,
+h2 {
+  margin: 0;
+  line-height: 0.95;
+  letter-spacing: -0.05em;
+}
+
+h1 {
+  font-size: clamp(4rem, 14vw, 10rem);
+}
+
+h2 {
+  font-size: clamp(2rem, 5vw, 4rem);
+}
+
+.lede {
+  max-width: 720px;
+  margin: 18px 0 0;
+  font-size: clamp(1.05rem, 2vw, 1.35rem);
+  font-weight: 700;
+}
+
+.workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.85fr);
+  gap: 28px;
+  align-items: start;
+}
+
+.panel {
+  padding: 24px;
+}
+
+.panel-header {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 22px;
+}
+
+.mode-switch {
+  display: flex;
+  border: 3px solid var(--ink);
+  background: var(--ink);
+  gap: 3px;
+}
+
+.mode-switch button {
+  border: 0;
+  padding: 12px 16px;
+  color: var(--ink);
+  background: #fffaf0;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.mode-switch button.active {
+  background: var(--base-blue);
+  color: white;
+}
+
+textarea,
+input {
+  width: 100%;
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  color: var(--ink);
+  background: white;
+  outline: none;
+}
+
+textarea:focus,
+input:focus {
+  box-shadow: 4px 4px 0 var(--base-blue);
+}
+
+textarea {
+  min-height: 380px;
+  padding: 18px;
+  resize: vertical;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+input {
+  margin-top: 8px;
+  padding: 13px 14px;
+}
+
+label {
+  display: block;
+  font-weight: 900;
+}
+
+.field-stack {
+  display: grid;
+  gap: 18px;
+  margin-top: 22px;
+}
+
+.hint,
+.note {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.note {
+  padding: 16px;
+  border: 3px solid var(--ink);
+  background: #dff3ff;
+}
+
+.contract-box {
+  display: grid;
+  gap: 8px;
+  margin: 24px 0;
+  padding: 16px;
+  border: 3px dashed var(--ink);
+  background: #fff;
+}
+
+.contract-box span {
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+code {
+  overflow-wrap: anywhere;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.launch-button {
+  width: 100%;
+  border: 3px solid var(--ink);
+  padding: 18px;
+  color: white;
+  background: var(--hot);
+  box-shadow: 5px 5px 0 var(--ink);
+  font-size: 1.05rem;
+  font-weight: 950;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+
+.launch-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.launch-button:not(:disabled):active {
+  transform: translate(5px, 5px);
+  box-shadow: none;
+}
+
+.status {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+  padding: 14px;
+  border: 3px solid var(--ink);
+  font-weight: 800;
+}
+
+.status.success {
+  background: var(--acid);
+}
+
+.status.error {
+  background: #ffd2d2;
+}
+
+@media (max-width: 860px) {
+  .shell {
+    width: min(100% - 22px, 720px);
+    padding: 28px 0;
+  }
+
+  .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .panel-header {
+    flex-direction: column;
+  }
+
+  .mode-switch,
+  .mode-switch button {
+    width: 100%;
+  }
+}
